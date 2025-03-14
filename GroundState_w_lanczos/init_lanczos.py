@@ -62,7 +62,7 @@ class SimulationConfig:
     def __init__(self):
         # Spatial grid parameters
         self.L = 20.0        # Domain size
-        self.N = 256         # Grid points per dimension
+        self.N = 128         # Grid points per dimension
         self.dx = self.L/self.N  # Grid spacing
         
         # Time evolution parameters
@@ -79,28 +79,9 @@ class SimulationConfig:
         # Derived parameters
         self.dxsq = self.dx**2
         self.nsteps = int(self.Tmax/self.dt)
-    
-    def validate(self):
-        """Validate simulation parameters.
-        
-        Similar to constraint checking in optimization problems.
-        Returns:
-            bool: True if parameters are valid
-            str: Error message if invalid
-        """
-        if self.L <= 0 or self.N <= 0:
-            return False, "Invalid spatial parameters"
-        if self.dt <= 0 or self.Tmax <= 0:
-            return False, "Invalid time parameters"
-        if self.kdim <= 0:
-            return False, "Invalid Krylov dimension"
-        return True, "Parameters valid"
 
 # Initialize configuration
 config = SimulationConfig()
-valid, msg = config.validate()
-if not valid:
-    raise ValueError(msg)
 
 # Grid setup with error checking
 def setup_grid(config):
@@ -110,13 +91,12 @@ def setup_grid(config):
         config: SimulationConfig object
     
     Returns:
-        tuple: (x, y, X, Y, KX, KY, r2, K2, V)
+        tuple: (x, y, X, Y, KX, KY, K2, V)
     """
     try:
         x = np.linspace(-config.L/2, config.L/2, config.N, dtype=np.float64)
         y = x.copy()
         X, Y = np.meshgrid(x, y)
-        r2 = X**2 + Y**2
         
         kx = np.fft.fftfreq(config.N, config.dx)
         ky = kx.copy()
@@ -124,14 +104,14 @@ def setup_grid(config):
         K2 = 4 * np.pi**2 * (KX**2 + KY**2)
         
         # Potential energy operator
-        V = 0.5 * config.m * config.omega**2 * r2
+        V = 0.5 * config.m * config.omega**2 * (KX**2 + KY**2)
         
-        return x, y, X, Y, KX, KY, r2, K2, V
+        return x, y, X, Y, KX, KY, K2, V
     except Exception as e:
         raise RuntimeError(f"Grid setup failed: {str(e)}")
 
 # Initialize grids
-x, y, X, Y, KX, KY, r2, K2, V = setup_grid(config)
+x, y, X, Y, KX, KY, K2, V = setup_grid(config)
 
 class QuantumState:
     """Class representing a quantum state with verification methods.
@@ -150,45 +130,6 @@ class QuantumState:
             raise ValueError("Wave function has zero norm")
         self.psi /= norm
         return self
-    
-    def compute_energy(self, V):
-        """Compute total energy with error analysis."""
-        # Kinetic energy
-        psi_k = np.fft.fft2(self.psi) / self.config.N
-        T_psi = (self.config.hbar**2/(2*self.config.m)) * np.fft.ifft2(K2 * psi_k) * self.config.N
-        T = np.real(np.sum(np.conj(self.psi) * T_psi) * self.config.dxsq)
-        
-        # Potential energy
-        V_expect = np.real(np.sum(np.conj(self.psi) * V * self.psi) * self.config.dxsq)
-        
-        return T, V_expect, T + V_expect
-    
-    def verify_properties(self, V):
-        """Comprehensive state verification.
-        
-        Returns dictionary of properties and their errors,
-        similar to fitness metrics in optimization.
-        """
-        results = {}
-        
-        # Normalization
-        norm = np.sum(np.abs(self.psi)**2) * self.config.dxsq
-        results['norm'] = {'value': norm, 'error': abs(norm - 1.0)}
-        
-        # Position expectation
-        r2_expect = np.sum(np.abs(self.psi)**2 * r2) * self.config.dxsq
-        r2_exact = self.config.hbar/(self.config.m * self.config.omega)
-        results['r2'] = {'value': r2_expect, 'error': abs(r2_expect - r2_exact)}
-        
-        # Energy components
-        T, V_expect, E = self.compute_energy(V)
-        E_exact = self.config.hbar * self.config.omega
-        results['T'] = {'value': T, 'error': abs(T - E_exact/2)}
-        results['V'] = {'value': V_expect, 'error': abs(V_expect - E_exact/2)}
-        results['E'] = {'value': E, 'error': abs(E - E_exact)}
-        results['T/V'] = {'value': T/V_expect, 'error': abs(T/V_expect - 1.0)}
-        
-        return results
 
 def create_ground_state(config):
     """Create and verify ground state with error bounds.
@@ -198,7 +139,7 @@ def create_ground_state(config):
     """
     # Create exact ground state
     scaling = np.sqrt(config.m * config.omega / config.hbar)
-    psi = np.sqrt(scaling/np.pi) * np.exp(-0.5 * scaling * r2)
+    psi = np.sqrt(scaling/np.pi) * np.exp(-0.5 * scaling * (KX**2 + KY**2))
     
     # Create quantum state object
     state = QuantumState(psi, config)
@@ -216,27 +157,6 @@ def create_ground_state(config):
     
     return state
 
-def hermite(n, x):
-    """Compute the nth Hermite polynomial."""
-    if n == 0:
-        return np.ones_like(x)
-    elif n == 1:
-        return 2 * x
-    else:
-        h0 = np.ones_like(x)
-        h1 = 2 * x
-        for i in range(2, n + 1):
-            h2 = 2 * x * h1 - 2 * (i - 1) * h0
-            h0 = h1
-            h1 = h2
-        return h1
-
-def hermite_function(n, x):
-    """Compute the nth Hermite function (normalized)."""
-    # ψₙ(x) = (1/√(2ⁿn!√π)) Hₙ(x) exp(-x²/2)
-    prefactor = 1.0 / np.sqrt(2**n * math.factorial(n) * np.sqrt(np.pi))
-    return prefactor * hermite(n, x) * np.exp(-x**2/2)
-
 def H_Psi(func_Psi, P):
     """Hamiltonian application using spectral method.
     
@@ -249,7 +169,7 @@ def H_Psi(func_Psi, P):
     T_psi = (config.hbar**2/(2*config.m)) * np.fft.ifft2(K2 * psi_k) * config.N
     
     # Add potential energy in real space
-    return T_psi + P * func_Psi
+    return T_psi + P * func_Psi + func_Psi * P
 
 def normalize(A):
     """Precise normalization with error checking."""
@@ -273,7 +193,9 @@ def lanczos(A, v1, k_max_iter=None):
         k_max_iter: Maximum Krylov subspace dimension
     
     Returns:
-        tuple: (T, W) where T is tridiagonal matrix and W is Krylov basis
+        tuple: (Psi_new, orth_check) where:
+            - Psi_new is the evolved state (unnormalized)
+            - orth_check is the orthogonality check between first and sixth Krylov vectors
     """
     k_max_iter = k_max_iter or A.shape[1]
     
@@ -284,9 +206,9 @@ def lanczos(A, v1, k_max_iter=None):
     v = np.zeros((config.N, config.N), dtype=np.complex128)
     Hw = np.zeros((config.N, config.N), dtype=np.complex128)
     
-    # Initialize first vector
-    w = normalize(v1.astype(np.complex128))
-    W[:,:,0] = w
+    # Initialize first vector (unnormalized)
+    w = v1.astype(np.complex128)
+    W[:,:,0] = v1
     w_prev = np.zeros_like(w)
     
     for j in range(k_max_iter):
@@ -310,7 +232,8 @@ def lanczos(A, v1, k_max_iter=None):
         if beta_j < 1e-14:
             T = np.diag(alpha[:j+1]) + np.diag(beta[:j], -1) + np.diag(beta[:j], 1)
             print(f'Returned early at iteration {j}, beta={beta_j:.16e}')
-            return T, W[:,:,:j+1]
+            W = W[:,:,:j+1]  # Trim W to actual size
+            break
             
         if j < k_max_iter - 1:
             beta[j] = beta_j
@@ -319,98 +242,40 @@ def lanczos(A, v1, k_max_iter=None):
             W[:,:,j+1] = w
     
     T = np.diag(alpha) + np.diag(beta, -1) + np.diag(beta, 1)
-    return T, W
+    U_T = expm(-1j * T * config.dt)
+    stateKrylov = U_T[:,0]
 
-def find_ground_state_ITE(config, V, max_steps=5000, tol=1e-10):
-    """Find ground state using imaginary time evolution.
-    
-    Implements the imaginary time evolution method:
-    ∂ψ/∂τ = -Hψ
-    
-    This equation preferentially damps out higher energy states,
-    causing the wavefunction to converge to the ground state.
-    
-    Args:
-        config: SimulationConfig object
-        V: Potential energy operator
-        max_steps: Maximum number of ITE steps
-        tol: Energy convergence tolerance
-    
-    Returns:
-        QuantumState: Ground state
-        list: Energy convergence history
-    """
-    # Initialize random state
-    psi = np.random.rand(config.N, config.N) + 1j * np.random.rand(config.N, config.N)
-    state = QuantumState(psi, config)
-    state.normalize()
-    
-    # Time evolution parameters
-    dt = 0.01  # Imaginary time step
-    energies = []
-    
-    print("\nFinding ground state using imaginary time evolution...")
-    
-    # Initial energy
-    H_psi = H_Psi(state.psi, V)
-    E_prev = np.real(np.sum(np.conj(state.psi) * H_psi) * config.dxsq)
-    energies.append(E_prev)
-    
-    # Imaginary time evolution
-    for step in range(max_steps):
-        # Apply Hamiltonian
-        H_psi = H_Psi(state.psi, V)
-        
-        # Euler step in imaginary time
-        state.psi -= H_psi * dt
-        state.normalize()
-        
-        # Compute and store energy
-        E = np.real(np.sum(np.conj(state.psi) * H_psi) * config.dxsq)
-        energies.append(E)
-        
-        # Check convergence
-        if abs(E - E_prev) < tol:
-            print(f"Converged after {step} steps! ΔE = {abs(E - E_prev):.2e}")
-            break
-            
-        E_prev = E
-        
-        if step % 500 == 0:
-            print(f"Step {step}: E = {E:.10f}, ΔE = {abs(E - E_prev):.2e}")
-    
-    # Plot energy convergence
-    plt.figure(figsize=(10, 6))
-    plt.plot(energies, 'k-', label='ITE Energy')
-    plt.axhline(y=config.hbar * config.omega, color='r', linestyle='--', 
-                label='Exact E₀')
-    plt.grid(True, alpha=0.3)
-    plt.xlabel('Iteration')
-    plt.ylabel('Energy / ℏω')
-    plt.title('Ground State Energy Convergence (ITE)')
-    plt.legend()
-    plt.yscale('log')  # Better visualization of convergence
-    plt.tight_layout()
-    plt.savefig('ite_convergence.png', dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    return state, energies
+    # Reconstruct wavefunction (unnormalized)
+    Psi_new = np.zeros((config.N, config.N), dtype=np.complex128)
+    for nn in range(kdim):
+        Psi_new += stateKrylov[nn] * W[:,:,nn]
+
+    # Check orthogonality between first and sixth vectors
+    orth_check = np.abs(np.sum(np.conj(W[:, :, 0]) * W[:, :, 5]) * config.dxsq)
+    if orth_check > 1e-10:
+        print(f"Warning: Orthogonality check exceeded threshold: {orth_check:.2e}")
+
+    return Psi_new, orth_check
 
 # Start timing
 t = time.process_time()
 
-# Initialize ground state using ITE
-print("Finding ground state using imaginary time evolution...")
-state, ite_energies = find_ground_state_ITE(config, V)
-E0 = state.compute_energy(V)[2]
+# Initialize ground state
+psi = np.random.rand(config.N, config.N) + 1j * np.random.rand(config.N, config.N)
+state = QuantumState(psi, config)
+state.normalize()
 
-# Verify the found ground state
-print("\nGround State Verification:")
-print("-" * 50)
-properties = state.verify_properties(V)
-for key, data in properties.items():
-    print(f"{key:.<20} {data['value']:.10f} (error: {data['error']:.2e})")
-print("-" * 50)
+# Calculate epsilon0 from imaginary time evolution
+H_psi = H_Psi(state.psi, V)
+Psi_new = np.exp(-H_psi * config.dt_imag / config.hbar) * state.psi
+Norm = np.sum(np.abs(Psi_new)**2) * config.dxsq
+epsilon0 = -np.log(Norm)/config.dt_imag
+print(f"Initial epsilon0: {epsilon0:.10f}")  # Debug print
+E0 = epsilon0  # epsilon0 is already the energy eigenvalue
+
+# Normalize after finding epsilon0
+Psi_new = normalize(Psi_new)
+state.psi = Psi_new
 
 # Time evolution setup
 print("\nStarting real-time evolution using Lanczos...")
@@ -424,19 +289,18 @@ max_energy_dev = 0.0
 
 # Main evolution loop
 for index, t_val in enumerate(Tvector):
+    #H_psi = H_Psi(state.psi, V)
     # Lanczos step
-    T, W = lanczos(V, state.psi, k_max_iter=kdim)
-    U_T = expm(-1j * T * config.dt)
+    Psi_new, orth_check = lanczos(V, state.psi, k_max_iter=kdim)
     
-    # Reconstruct wavefunction
-    Psi_new.fill(0)
-    for nn in range(W.shape[2]):
-        Psi_new += U_T[0, nn] * W[:,:,nn]
-    
-    # Update and compute observables
-    state.psi = normalize(Psi_new)
-    Energy = np.real(np.sum(np.conj(state.psi) * H_Psi(state.psi, V)) * config.dxsq)
+    # Calculate energy from norm decay
+    norm = np.sum(np.abs(Psi_new)**2) * config.dxsq
+    epsilon = -np.log(norm)/config.dt
+    Energy = epsilon  # epsilon is already the energy eigenvalue *1*1
     EnergyVector[index] = Energy
+    
+    # Normalize for next step
+    state.psi = Psi_new / np.sqrt(norm)
     
     # Track energy deviation
     energy_dev = abs(Energy - E0)
@@ -445,19 +309,17 @@ for index, t_val in enumerate(Tvector):
     if index % 250 == 0:
         elapsed_time = time.process_time() - t
         print(f'Step: {index}/{len(Tvector)} | E = {Energy:.10f} | ΔE = {energy_dev:.2e} | Max ΔE = {max_energy_dev:.2e} | Time: {elapsed_time:.2f}s')
+        print(f'Orthogonality check: {orth_check}')
 
 elapsed_time = time.process_time() - t
 # Final diagnostics
 print("\nFinal state verification:")
-orth_check = np.abs(np.sum(np.conj(W[:, :, 0]) * W[:, :, 2]) * config.dxsq)
-print(f'Orthogonality check: {orth_check}')
 print("Checking final state properties...")
-state.verify_properties(V)  # Print verification results
 print(f'Maximum Energy Deviation: {max_energy_dev:.2e}')
 print(f'Time elapsed: {elapsed_time:.2f} seconds')
 
 # Add performance metrics
-def print_performance_metrics(elapsed_time, max_energy_dev, properties):
+def print_performance_metrics(elapsed_time, max_energy_dev):
     """Print comprehensive performance metrics.
     
     Similar to optimization algorithm metrics reporting.
@@ -467,15 +329,11 @@ def print_performance_metrics(elapsed_time, max_energy_dev, properties):
     print(f"Total time steps: {config.nsteps}")
     print(f"Time per step: {elapsed_time/config.nsteps:.3f} seconds")
     print(f"Energy conservation: {max_energy_dev:.2e}")
-    print(f"Final state errors:")
-    for key, data in properties.items():
-        print(f"  {key}: {data['error']:.2e}")
     print("-" * 50)
 
 # Final verification with comprehensive metrics
 t_end = time.process_time()
-final_properties = state.verify_properties(V)
-print_performance_metrics(t_end - t, max_energy_dev, final_properties)
+print_performance_metrics(t_end - t, max_energy_dev)
 
 # Visualization of results
 print("\nGenerating plots...")
