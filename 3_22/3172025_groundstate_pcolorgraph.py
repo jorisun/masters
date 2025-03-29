@@ -103,8 +103,7 @@ class SimulationConfig:
         self.dx = self.L/(self.N - 1)  # Grid spacing
         
         # Time evolution parameters
-        self.dt = 1e-3       # Real time step
-        self.dt_imag = 0.01  # Imaginary time step
+        self.dt_imag = 5e-3       # Imag time step
         self.Tmax = 5.0      # Total simulation time
         self.kdim = 8        # Krylov subspace dimension
         
@@ -120,12 +119,12 @@ class SimulationConfig:
         self.dxsq = self.dx**2
 
         #Real time parameters
-        self.Tf = [10, 25, 50, 75, 90, 100, 110, 125, 150, 200]
-        self.Nt = [1000, 2500, 5000, 7500, 9000, 10000, 11000, 12500, 15000, 20000]
-        #self.Tf = [75, 125, 200]
-        #self.Nt = [7500, 12500, 20000]
-        self.real_dt = [self.Tf[i]/(self.Nt[i]-1) for i in range(len(self.Tf))]
-        self.Tvector_real = [np.linspace(0, self.Tf[i], self.Nt[i]) for i in range(len(self.Tf))]
+        self.Tf = np.arange(5, 125, 5)
+        self.Nt = [self.Tf*10, self.Tf*50, self.Tf*100]
+        self.real_dt = [[self.Tf[i]/(self.Nt[0][i]-1) for i in range(len(self.Tf))], [self.Tf[i]/(self.Nt[1][i]-1) for i in range(len(self.Tf))], [self.Tf[i]/(self.Nt[2][i]-1) for i in range(len(self.Tf))]]
+        #self.real_dt = [self.Tf[i]/(self.Nt[i]-1) for i in range(len(self.Tf))]
+        self.Tvector_real = [[np.linspace(0, self.Tf[i], self.Nt[0][i]) for i in range(len(self.Tf))], [np.linspace(0, self.Tf[i], self.Nt[1][i]) for i in range(len(self.Tf))], [np.linspace(0, self.Tf[i], self.Nt[2][i]) for i in range(len(self.Tf))]]
+        #self.Tvector_real = [np.linspace(0, self.Tf[i], self.Nt[i]) for i in range(len(self.Tf))]
 
 # Initialize configuration
 config = SimulationConfig()
@@ -215,9 +214,10 @@ def H_Psi(func_Psi, P):
 
 def smooth_t_evolution(t, tf):
     s = t/tf
-    return 35*s**4 - 84*s**5 + 70*s**6 - 20*s**7  # 7th order polynomial for ultra-smooth transition
+    #return 35*s**4 - 84*s**5 + 70*s**6 - 20*s**7  # 7th order polynomial for ultra-smooth transition
+    return 1-np.cos(s * np.pi/2)
 
-def lanczos(A, v1, k_max_iter=None, img_time=False):
+def lanczos(A, v1, dt, k_max_iter=None, img_time=False):
     """Highly optimized Lanczos implementation for real-time evolution.
     
     Builds a Krylov subspace representation of the Hamiltonian,
@@ -295,9 +295,9 @@ def lanczos(A, v1, k_max_iter=None, img_time=False):
     
     try:
         if img_time:
-            U_T = expm(-T * config.dt)
+            U_T = expm(-T * dt)
         else:
-            U_T = expm(-1j * T * config.dt)
+            U_T = expm(-1j * T * dt)
     except Exception as e:
         print(f"Warning: Matrix exponential failed: {str(e)}")
         return np.zeros_like(v1)
@@ -334,7 +334,7 @@ state = QuantumState(psi_step1, psi_step3, psi_real, config)
 
 # Time evolution setup
 print("\nStarting real-time evolution using Lanczos...")
-Tvector = np.arange(0, config.Tmax, config.dt)
+Tvector = np.arange(0, config.Tmax, config.dt_imag)
 EnergyVector = np.zeros(len(Tvector), dtype=np.complex128)
 kdim = config.kdim
 
@@ -347,11 +347,11 @@ max_energy_dev = 0.0
 # Main evolution loop step 1
 for index, t_val in enumerate(Tvector):
     # Lanczos step
-    Psi_new1 = lanczos(V_initial, state.psi_step1, k_max_iter=kdim, img_time=True)
+    Psi_new1 = lanczos(V_initial, state.psi_step1, config.dt_imag, k_max_iter=kdim, img_time=True)
     
     # Calculate energy from norm decay
     norm = np.sum(np.abs(Psi_new1)**2) * config.dxsq
-    epsilon = -np.log(norm)/(2*config.dt)
+    epsilon = -np.log(norm)/(2*config.dt_imag)
     Energy = epsilon  # epsilon is already the energy eigenvalue *1*1
     EnergyVector[index] = Energy
     
@@ -369,11 +369,11 @@ print("-" * 50)
 # Main evolution loop step 3
 for index, t_val in enumerate(Tvector):
     # Lanczos step
-    Psi_new3 = lanczos(V_final, state.psi_step3, k_max_iter=kdim, img_time=True)
+    Psi_new3 = lanczos(V_final, state.psi_step3, config.dt_imag, k_max_iter=kdim, img_time=True)
     
     # Calculate energy from norm decay
     norm = np.sum(np.abs(Psi_new3)**2) * config.dxsq
-    epsilon = -np.log(norm)/(2*config.dt)
+    epsilon = -np.log(norm)/(2*config.dt_imag)
     Energy = epsilon  # epsilon is already the energy eigenvalue *1*1
     EnergyVector[index] = Energy
     
@@ -389,9 +389,11 @@ print("Step 3 done. Starting real-time evolution (step 2)...")
 print("-" * 50)
 
 # Initialize overlap array and pre-allocate arrays for evolution
+overlap_touple = [[], [], []]
 overlap_array = np.zeros(len(config.Tf))
 Psi_real = np.zeros((config.N, config.N), dtype=np.complex128)
 V_real = np.zeros((config.N, config.N))
+
 
 # Pre-calculate potential differences to avoid repeated calculations
 V_diff = V_final - V_initial
@@ -401,75 +403,79 @@ psi_step3_conj = np.conj(state.psi_step3)
 
 # Set up plot update interval
 plot_update_interval = 10  # Update plot every 10 steps
+for k in range(len(config.Nt)):
 
-for t_step in range(len(config.Tf)):
-    Tvector_real = config.Tvector_real[t_step]
-    Nt = config.Nt[t_step]
-    real_dt = config.real_dt[t_step]
-    Tf = config.Tf[t_step]
-    
-    print(f"\nStarting evolution with Tf={Tf}s, Nt={Nt}, dt={real_dt:.6f}")
-    
-    # Reset state for each run
-    state.psi_real = state.psi_step1.copy()
-    
-    # Create directory for this Tf if it doesn't exist
-    dir_name = f'evolution_Tf{Tf}'
-    os.makedirs(dir_name, exist_ok=True)
-    
-    # Set up the plot for animation
-    plt.ion()  # Turn on interactive mode
-    fig = plt.figure(figsize=(12, 8))
-    ax = fig.add_subplot(111)
-    im = ax.pcolormesh(X, Y, np.abs(state.psi_real)**2, shading='auto', cmap='viridis')
-    plt.colorbar(im, label='Probability Density')
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    ax.set_title(f'Wavefunction Evolution (Tf={Tf}s, t=0.00s)\nOverlap: 0.000000')
-    ax.axis('equal')
-    plt.tight_layout()
-    
-    for t_idx, t in enumerate(Tvector_real):
-        # Calculate the time-dependent potential with smooth transition
-        s = smooth_t_evolution((t+real_dt/2), Tf)
-        V_real = V_initial + s * V_diff  # Same result as full calculation, but more efficient
-
-        # Lanczos step with smaller time step for better stability
-        Psi_real = lanczos(V_real, state.psi_real, k_max_iter=kdim, img_time=False)
-
-        # Normalize the state
-        norm = np.sum(np.abs(Psi_real)**2) * config.dxsq
-        if norm < config.stability_threshold or np.isnan(norm) or np.isinf(norm):
-            print(f"Warning: Invalid norm at t={t:.2f}, skipping step")
-            continue
-        state.psi_real = Psi_real / np.sqrt(norm)
-
-        # Calculate overlap using pre-calculated conjugate and vectorized operations
-        Overlap = np.abs(np.sum(psi_step3_conj * state.psi_real) * config.dxsq)**2
+    for t_step in range(len(config.Tf)):
+        Tvector_real = config.Tvector_real[k][t_step]
+        Nt = config.Nt[k][t_step]
+        real_dt = config.real_dt[k][t_step]
+        Tf = config.Tf[t_step]
         
-        # Update the plot at intervals
-        if t_idx % plot_update_interval == 0:
-            im.set_array(np.abs(state.psi_real)**2)
-            ax.set_title(f'Wavefunction Evolution (Tf={Tf}s, t={t:.2f}s)\nOverlap: {Overlap:.10f}')
-            fig.canvas.draw()
-            fig.canvas.flush_events()
+        print(f"\nStarting evolution with Tf={Tf}s, Nt={Nt}, dt={real_dt:.6f}")
+        
+        # Reset state for each run
+        state.psi_real = state.psi_step1.copy()
+        """
+        # Create directory for this Tf if it doesn't exist
+        dir_name = f'evolution_Tf{Tf}_{k}'
+        os.makedirs(dir_name, exist_ok=True)
+        
+        # Set up the plot for animation
+        plt.ion()  # Turn on interactive mode
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(111)
+        im = ax.pcolormesh(X, Y, np.abs(state.psi_real)**2, shading='auto', cmap='viridis')
+        plt.colorbar(im, label='Probability Density')
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        ax.set_title(f'Wavefunction Evolution (Tf={Tf} units, t=0.00)\nOverlap: 0.000000')
+        ax.axis('equal')
+        plt.tight_layout()
+        """
+        for t_idx, t in enumerate(Tvector_real):
+            # Calculate the time-dependent potential with smooth transition
+            s = smooth_t_evolution(t + real_dt/2, Tf)
+            V_real = V_initial + s * V_diff
 
-            plt.savefig(f'{dir_name}/final_state{t_idx}.png', dpi=300, bbox_inches='tight')
+            # Lanczos step with smaller time step for better stability
+            state.psi_real = lanczos(V_real, state.psi_real, real_dt, k_max_iter=kdim, img_time=False)
+
+            # Normalize the state
+            #norm = np.sum(np.abs(Psi_real)**2) * config.dxsq
+            #if norm < config.stability_threshold or np.isnan(norm) or np.isinf(norm):
+            #    print(f"Warning: Invalid norm at t={t:.2f}, skipping step")
+            #    continue
+            #state.psi_real = Psi_real /norm
+
+            # Calculate overlap using pre-calculated conjugate and vectorized operations
+            Overlap = np.abs(np.sum(psi_step3_conj * state.psi_real) * config.dxsq)**2
+
+            """
+            # Update the plot at intervals
+            if t_idx % plot_update_interval == 0:
+                im.set_array(np.abs(state.psi_real)**2)
+                ax.set_title(f'Wavefunction Evolution (Tf={Tf} units, t={t:.2f} units)\nOverlap: {Overlap:.10f}')
+                fig.canvas.draw()
+                fig.canvas.flush_events()
+
+                plt.savefig(f'{dir_name}/final_state{t_idx}.png', dpi=300, bbox_inches='tight')
+            """
+            # Memory management
+            if t_idx % 1000 == 0:
+                gc.collect()
+            
+            # Print progress at 25% intervals
+            if t_idx % (Nt//4) == 0:
+                elapsed_time = time.process_time() - t
+                print(f'Step: {t*100/Tf:.0f}% | Overlap: {Overlap:.10f} | Time: {elapsed_time:.2f}s')
         
-        # Memory management
-        if t_idx % 1000 == 0:
-            gc.collect()
+        overlap_array[t_step] = Overlap
+
+        #plt.close()  # Close the interactive plot for this Tf
         
-        # Print progress at 25% intervals
-        if t_idx % (Nt//4) == 0:
-            elapsed_time = time.process_time() - t
-            print(f'Step: {t*100/Tf:.0f}% | Overlap: {Overlap:.10f} | Time: {elapsed_time:.2f}s')
-    
-    plt.close()  # Close the interactive plot for this Tf
-    
-    overlap_array[t_step] = Overlap
-    elapsed_time = time.process_time() - t
-    print(f'Final Overlap: {Overlap:.10f} | Time: {elapsed_time:.2f}s')
+        elapsed_time = time.process_time() - t
+        print(f'Final Overlap: {Overlap:.10f} | Time: {elapsed_time:.2f}s')
+    overlap_touple[k] = overlap_array
 
 # Final diagnostics
 elapsed_time = time.process_time() - t
@@ -480,8 +486,13 @@ print(f'Time elapsed: {elapsed_time:.2f} seconds')
 # Final verification with comprehensive metrics
 t_end = time.process_time()
 
+print(config.Tf)
+print(overlap_touple)
+
 plt.figure(figsize=(12, 8))
-plt.plot(config.Tf, overlap_array, 'b-o', linewidth=2, markersize=8, label='Overlap')
+plt.plot(config.Tf, overlap_touple[0], 'b-o', linewidth=2, markersize=8, label='Overlap Tf*10')
+plt.plot(config.Tf, overlap_touple[1], 'g-o', linewidth=2, markersize=8, label='Overlap Tf*50')
+plt.plot(config.Tf, overlap_touple[2], 'm-o', linewidth=2, markersize=8, label='Overlap Tf*100')
 plt.grid(True, linestyle='--', alpha=0.7)
 plt.xlabel(r'Transition Time $T_f$ (s)', fontsize=12, labelpad=10)
 plt.ylabel(r'$|\langle \psi_f | \psi(t) \rangle|^2$', fontsize=12, labelpad=10)
