@@ -119,11 +119,19 @@ class SimulationConfig:
         self.dxsq = self.dx**2
 
         #Real time parameters
-        self.Tf = np.arange(5, 125, 5)
-        self.Nt = [self.Tf*10, self.Tf*50, self.Tf*100]
-        self.real_dt = [[self.Tf[i]/(self.Nt[0][i]-1) for i in range(len(self.Tf))], [self.Tf[i]/(self.Nt[1][i]-1) for i in range(len(self.Tf))], [self.Tf[i]/(self.Nt[2][i]-1) for i in range(len(self.Tf))]]
+        self.Tf = np.arange(5, 150, 5)
+        self.Nt = [self.Tf, self.Tf*5, self.Tf*10, self.Tf*15, self.Tf*20, self.Tf*30]
+
+        self.real_dt = []
+        for l in range(len(self.Nt)):
+            self.real_dt.append([self.Tf[i]/(self.Nt[l][i]-1) for i in range(len(self.Tf))])
+        self.Tvector_real = []
+        for l in range(len(self.Nt)):
+            self.Tvector_real.append([np.linspace(0, self.Tf[i], self.Nt[l][i]) for i in range(len(self.Tf))])
+
+        #self.real_dt = [[self.Tf[i]/(self.Nt[0][i]-1) for i in range(len(self.Tf))], [self.Tf[i]/(self.Nt[1][i]-1) for i in range(len(self.Tf))], [self.Tf[i]/(self.Nt[2][i]-1) for i in range(len(self.Tf))]]
         #self.real_dt = [self.Tf[i]/(self.Nt[i]-1) for i in range(len(self.Tf))]
-        self.Tvector_real = [[np.linspace(0, self.Tf[i], self.Nt[0][i]) for i in range(len(self.Tf))], [np.linspace(0, self.Tf[i], self.Nt[1][i]) for i in range(len(self.Tf))], [np.linspace(0, self.Tf[i], self.Nt[2][i]) for i in range(len(self.Tf))]]
+        #self.Tvector_real = [[np.linspace(0, self.Tf[i], self.Nt[0][i]) for i in range(len(self.Tf))], [np.linspace(0, self.Tf[i], self.Nt[1][i]) for i in range(len(self.Tf))], [np.linspace(0, self.Tf[i], self.Nt[2][i]) for i in range(len(self.Tf))]]
         #self.Tvector_real = [np.linspace(0, self.Tf[i], self.Nt[i]) for i in range(len(self.Tf))]
 
 # Initialize configuration
@@ -389,7 +397,7 @@ print("Step 3 done. Starting real-time evolution (step 2)...")
 print("-" * 50)
 
 # Initialize overlap array and pre-allocate arrays for evolution
-overlap_touple = [[], [], []]
+overlap_touple = np.zeros((len(config.Nt), len(config.Tf)))
 overlap_array = np.zeros(len(config.Tf))
 Psi_real = np.zeros((config.N, config.N), dtype=np.complex128)
 V_real = np.zeros((config.N, config.N))
@@ -402,9 +410,10 @@ V_diff = V_final - V_initial
 psi_step3_conj = np.conj(state.psi_step3)
 
 # Set up plot update interval
-plot_update_interval = 10  # Update plot every 10 steps
+#plot_update_interval = 10  # Update plot every 10 steps
+HighestP = 0.997
+HighValues = []
 for k in range(len(config.Nt)):
-
     for t_step in range(len(config.Tf)):
         Tvector_real = config.Tvector_real[k][t_step]
         Nt = config.Nt[k][t_step]
@@ -447,9 +456,6 @@ for k in range(len(config.Nt)):
             #    continue
             #state.psi_real = Psi_real /norm
 
-            # Calculate overlap using pre-calculated conjugate and vectorized operations
-            Overlap = np.abs(np.sum(psi_step3_conj * state.psi_real) * config.dxsq)**2
-
             """
             # Update the plot at intervals
             if t_idx % plot_update_interval == 0:
@@ -466,16 +472,24 @@ for k in range(len(config.Nt)):
             
             # Print progress at 25% intervals
             if t_idx % (Nt//4) == 0:
-                elapsed_time = time.process_time() - t
-                print(f'Step: {t*100/Tf:.0f}% | Overlap: {Overlap:.10f} | Time: {elapsed_time:.2f}s')
+                #elapsed_time = time.process_time() - t
+                #print(f'Step: {t*100/Tf:.0f}% | Overlap: {Overlap:.10f} | Time: {elapsed_time:.2f}s')
+                print(f'Step: {t*100/Tf:.0f}%')
         
+        # Calculate overlap using pre-calculated conjugate and vectorized operations
+        Overlap = np.abs(np.sum(psi_step3_conj * state.psi_real) * config.dxsq)**2
         overlap_array[t_step] = Overlap
+        if Overlap > HighestP:
+            HighestP = Overlap
+            finalText = f'High overlap: {HighestP}, with Tf={Tf}s, Nt/Tf={Nt/Tf}, dt={real_dt:.6f}'
+            HighValues.append([finalText])
+            
 
         #plt.close()  # Close the interactive plot for this Tf
         
         elapsed_time = time.process_time() - t
         print(f'Final Overlap: {Overlap:.10f} | Time: {elapsed_time:.2f}s')
-    overlap_touple[k] = overlap_array
+    overlap_touple[k, :] = overlap_array
 
 # Final diagnostics
 elapsed_time = time.process_time() - t
@@ -486,13 +500,18 @@ print(f'Time elapsed: {elapsed_time:.2f} seconds')
 # Final verification with comprehensive metrics
 t_end = time.process_time()
 
-print(config.Tf)
-print(overlap_touple)
+for i in range(len(HighValues)):
+    print(HighValues[i])
 
 plt.figure(figsize=(12, 8))
-plt.plot(config.Tf, overlap_touple[0], 'b-o', linewidth=2, markersize=8, label='Overlap Tf*10')
-plt.plot(config.Tf, overlap_touple[1], 'g-o', linewidth=2, markersize=8, label='Overlap Tf*50')
-plt.plot(config.Tf, overlap_touple[2], 'm-o', linewidth=2, markersize=8, label='Overlap Tf*100')
+plot_colors = ['b', 'm', 'g', 'y', 'c']
+plot_markers = [',', '>', '4', 'h', '|', 'o']
+for i in range(len(overlap_touple)):
+    plot_line = f'{np.random.choice(plot_colors)}-{np.random.choice(plot_markers)}'
+    plt.plot(config.Tf, overlap_touple[i], f'{plot_line}', linewidth=2, markersize=8, label=f'Overlap Nt: {config.Nt[i][-1]}')
+#plt.plot(config.Tf, overlap_touple[0], 'b-*', linewidth=2, markersize=8, label='Overlap Nt = Tf')
+#plt.plot(config.Tf, overlap_touple[1], 'g-D', linewidth=2, markersize=8, label='Overlap Nt = Tf*5')
+#plt.plot(config.Tf, overlap_touple[2], 'm-.', linewidth=2, markersize=8, label='Overlap Nt = Tf*10')
 plt.grid(True, linestyle='--', alpha=0.7)
 plt.xlabel(r'Transition Time $T_f$ (s)', fontsize=12, labelpad=10)
 plt.ylabel(r'$|\langle \psi_f | \psi(t) \rangle|^2$', fontsize=12, labelpad=10)
@@ -556,93 +575,25 @@ Step: 4750/5000 | E = 1.0000000281 | Time: 121.78s
 Step 3 done. Starting real-time evolution (step 2)...
 --------------------------------------------------
 
-Starting evolution with Tf=10s, Nt=1000, dt=0.010010
-Step: 0% | Overlap: 0.0000000414 | Time: 125.67s
-Step: 25% | Overlap: 0.0000000417 | Time: 126.29s
-Step: 50% | Overlap: 0.0000000485 | Time: 126.90s
-Step: 75% | Overlap: 0.0000000635 | Time: 127.52s
-Final Overlap: 0.0000000659 | Time: 128.14s
-
-Starting evolution with Tf=25s, Nt=2500, dt=0.010004
-Step: 0% | Overlap: 0.0000000414 | Time: 138.16s
-Step: 25% | Overlap: 0.0000000430 | Time: 139.64s
-Step: 50% | Overlap: 0.0000001071 | Time: 141.20s
-Step: 75% | Overlap: 0.0000005141 | Time: 142.71s
-Final Overlap: 0.0000006319 | Time: 144.19s
-
-Starting evolution with Tf=50s, Nt=5000, dt=0.010002
-Step: 0% | Overlap: 0.0000000414 | Time: 169.20s
-Step: 25% | Overlap: 0.0000000478 | Time: 172.15s
-Step: 50% | Overlap: 0.0000012894 | Time: 175.07s
-Step: 75% | Overlap: 0.0001568647 | Time: 178.02s
-Final Overlap: 0.0002502454 | Time: 181.00s
-
-Starting evolution with Tf=75s, Nt=7500, dt=0.010001
-Step: 0% | Overlap: 0.0000000414 | Time: 231.00s
-Step: 25% | Overlap: 0.0000000564 | Time: 235.48s
-Step: 50% | Overlap: 0.0000299334 | Time: 239.95s
-Step: 75% | Overlap: 0.0311714560 | Time: 244.41s
-Final Overlap: 0.0441826102 | Time: 248.84s
-
-Starting evolution with Tf=90s, Nt=9000, dt=0.010001
-Step: 0% | Overlap: 0.0000000414 | Time: 323.86s
-Step: 25% | Overlap: 0.0000000639 | Time: 329.40s
-Step: 50% | Overlap: 0.0001796980 | Time: 334.67s
-Step: 75% | Overlap: 0.2253244513 | Time: 339.98s
-Final Overlap: 0.2672160013 | Time: 345.16s
-
-Starting evolution with Tf=100s, Nt=10000, dt=0.010001
-Step: 0% | Overlap: 0.0000000414 | Time: 435.17s
-Step: 25% | Overlap: 0.0000000699 | Time: 441.00s
-Step: 50% | Overlap: 0.0005144605 | Time: 446.90s
-Step: 75% | Overlap: 0.4939174180 | Time: 452.70s
-Final Overlap: 0.5304749666 | Time: 458.55s
-
-Starting evolution with Tf=110s, Nt=11000, dt=0.010001
-Step: 0% | Overlap: 0.0000000414 | Time: 558.56s
-Step: 25% | Overlap: 0.0000000768 | Time: 565.09s
-Step: 50% | Overlap: 0.0012672498 | Time: 571.57s
-Step: 75% | Overlap: 0.7670510547 | Time: 578.07s
-Final Overlap: 0.7762307221 | Time: 584.55s
-
-Starting evolution with Tf=125s, Nt=12500, dt=0.010001
-Step: 0% | Overlap: 0.0000000414 | Time: 694.55s
-Step: 25% | Overlap: 0.0000000889 | Time: 701.92s
-Step: 50% | Overlap: 0.0035907889 | Time: 709.28s
-Step: 75% | Overlap: 0.9671806747 | Time: 716.66s
-Final Overlap: 0.9669467784 | Time: 723.89s
-
-Starting evolution with Tf=150s, Nt=15000, dt=0.010001
-Step: 0% | Overlap: 0.0000000414 | Time: 848.91s
-Step: 25% | Overlap: 0.0000001141 | Time: 857.64s
-Step: 50% | Overlap: 0.0093365853 | Time: 866.53s
-Step: 75% | Overlap: 0.9285384728 | Time: 875.24s
-Final Overlap: 0.9960163921 | Time: 884.09s
-
-Starting evolution with Tf=200s, Nt=20000, dt=0.010001
-Step: 0% | Overlap: 0.0000000414 | Time: 1034.09s
-Step: 25% | Overlap: 0.0000001810 | Time: 1046.04s
-Step: 50% | Overlap: 0.0119960628 | Time: 1057.85s
-Step: 75% | Overlap: 0.9344866551 | Time: 1069.66s
-Final Overlap: 0.9997036205 | Time: 1081.28s
-
-Final state verification:
-Checking final state properties...
-Time elapsed: 1081.28 seconds
-
-Performance Metrics:
---------------------------------------------------
-Total simulation time: 1081.28 seconds
-
-Evolution Statistics:
-Number of time steps: 5000
-Number of evolution runs: 10
-Evolution times: [10, 25, 50, 75, 90, 100, 110, 125, 150, 200]
-
-Memory Usage:
-Grid size per array: 0.25 MB
-Total grid memory: 0.75 MB (3 arrays)
---------------------------------------------------
+Time elapsed: 2254.67 seconds
+['High overlap: 0.9970813174889056, with Tf=120s, Nt/Tf=15.0, dt=0.066704']
+['High overlap: 0.9971747331231592, with Tf=125s, Nt/Tf=15.0, dt=0.066702']
+['High overlap: 0.9973108274189879, with Tf=130s, Nt/Tf=15.0, dt=0.066701']
+['High overlap: 0.9975215598141406, with Tf=135s, Nt/Tf=15.0, dt=0.066700']
+['High overlap: 0.9975215598141406, with Tf=135s, Nt/Tf=15.0, dt=0.066700']
+['High overlap: 0.997587253796677, with Tf=140s, Nt/Tf=15.0, dt=0.066698']
+['High overlap: 0.9977213780537908, with Tf=145s, Nt/Tf=15.0, dt=0.066697']
+['High overlap: 0.9978502814765545, with Tf=85s, Nt/Tf=20.0, dt=0.050029']
+['High overlap: 0.9982901609276473, with Tf=90s, Nt/Tf=20.0, dt=0.050028']
+['High overlap: 0.9983771375379519, with Tf=95s, Nt/Tf=20.0, dt=0.050026']
+['High overlap: 0.9985759264422064, with Tf=100s, Nt/Tf=20.0, dt=0.050025']
+['High overlap: 0.9985899739859613, with Tf=110s, Nt/Tf=20.0, dt=0.050023']
+['High overlap: 0.998654577154167, with Tf=115s, Nt/Tf=20.0, dt=0.050022']
+['High overlap: 0.9987325201919571, with Tf=120s, Nt/Tf=20.0, dt=0.050021']
+['High overlap: 0.9988079546848044, with Tf=125s, Nt/Tf=20.0, dt=0.050020']
+['High overlap: 0.9988691426241746, with Tf=130s, Nt/Tf=20.0, dt=0.050019']
+['High overlap: 0.9989232836518303, with Tf=135s, Nt/Tf=20.0, dt=0.050019']
+['High overlap: 0.9989505243174874, with Tf=145s, Nt/Tf=20.0, dt=0.050017']
 """
 
 
