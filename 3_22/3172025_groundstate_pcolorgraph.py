@@ -85,7 +85,6 @@ import numpy as np
 from scipy.linalg import expm
 import matplotlib.pyplot as plt
 import time
-import os
 import gc
 
 # Configuration parameters
@@ -120,11 +119,20 @@ class SimulationConfig:
 
         #Real time parameters
         self.Tf = np.arange(5, 150, 5)
-        self.Nt = [self.Tf, self.Tf*5, self.Tf*10, self.Tf*15, self.Tf*20, self.Tf*30]
+        #self.Tf = np.arange(5, 105, 10)
+        #self.Nt = [self.Tf, self.Tf*5, self.Tf*10, self.Tf*15, self.Tf*20, self.Tf*30]
 
-        self.real_dt = []
-        for l in range(len(self.Nt)):
-            self.real_dt.append([self.Tf[i]/(self.Nt[l][i]-1) for i in range(len(self.Tf))])
+        self.real_dt = [1e-3, 5e-3, 1e-2, 5e-2, 1e-1, 5e-1]
+        #self.real_dt = [0.2, 0.5, 1]
+        self.Nt = []
+        for i in range(len(self.real_dt)):
+            self.Nt.append(
+                [int(self.Tf[l] / self.real_dt[i]) for l in range(len(self.Tf))]
+            )
+
+        #self.real_dt = []
+        #for l in range(len(self.Nt)):
+        #    self.real_dt.append([self.Tf[i]/(self.Nt[l][i]-1) for i in range(len(self.Tf))])
         self.Tvector_real = []
         for l in range(len(self.Nt)):
             self.Tvector_real.append([np.linspace(0, self.Tf[i], self.Nt[l][i]) for i in range(len(self.Tf))])
@@ -417,7 +425,7 @@ for k in range(len(config.Nt)):
     for t_step in range(len(config.Tf)):
         Tvector_real = config.Tvector_real[k][t_step]
         Nt = config.Nt[k][t_step]
-        real_dt = config.real_dt[k][t_step]
+        real_dt = config.real_dt[k]
         Tf = config.Tf[t_step]
         
         print(f"\nStarting evolution with Tf={Tf}s, Nt={Nt}, dt={real_dt:.6f}")
@@ -575,25 +583,25 @@ Step: 4750/5000 | E = 1.0000000281 | Time: 121.78s
 Step 3 done. Starting real-time evolution (step 2)...
 --------------------------------------------------
 
-Time elapsed: 2254.67 seconds
-['High overlap: 0.9970813174889056, with Tf=120s, Nt/Tf=15.0, dt=0.066704']
-['High overlap: 0.9971747331231592, with Tf=125s, Nt/Tf=15.0, dt=0.066702']
-['High overlap: 0.9973108274189879, with Tf=130s, Nt/Tf=15.0, dt=0.066701']
-['High overlap: 0.9975215598141406, with Tf=135s, Nt/Tf=15.0, dt=0.066700']
-['High overlap: 0.9975215598141406, with Tf=135s, Nt/Tf=15.0, dt=0.066700']
-['High overlap: 0.997587253796677, with Tf=140s, Nt/Tf=15.0, dt=0.066698']
-['High overlap: 0.9977213780537908, with Tf=145s, Nt/Tf=15.0, dt=0.066697']
-['High overlap: 0.9978502814765545, with Tf=85s, Nt/Tf=20.0, dt=0.050029']
-['High overlap: 0.9982901609276473, with Tf=90s, Nt/Tf=20.0, dt=0.050028']
-['High overlap: 0.9983771375379519, with Tf=95s, Nt/Tf=20.0, dt=0.050026']
-['High overlap: 0.9985759264422064, with Tf=100s, Nt/Tf=20.0, dt=0.050025']
-['High overlap: 0.9985899739859613, with Tf=110s, Nt/Tf=20.0, dt=0.050023']
-['High overlap: 0.998654577154167, with Tf=115s, Nt/Tf=20.0, dt=0.050022']
-['High overlap: 0.9987325201919571, with Tf=120s, Nt/Tf=20.0, dt=0.050021']
-['High overlap: 0.9988079546848044, with Tf=125s, Nt/Tf=20.0, dt=0.050020']
-['High overlap: 0.9988691426241746, with Tf=130s, Nt/Tf=20.0, dt=0.050019']
-['High overlap: 0.9989232836518303, with Tf=135s, Nt/Tf=20.0, dt=0.050019']
-['High overlap: 0.9989505243174874, with Tf=145s, Nt/Tf=20.0, dt=0.050017']
+Final state verification:
+Checking final state properties...
+Time elapsed: 37841.67 seconds
+['High overlap: 0.9971194652204016, with Tf=120s, Nt/Tf=1000.0, dt=0.001000']
+['High overlap: 0.9972461994465586, with Tf=125s, Nt/Tf=1000.0, dt=0.001000']
+['High overlap: 0.9974494570891055, with Tf=130s, Nt/Tf=1000.0, dt=0.001000']
+['High overlap: 0.9977130323435627, with Tf=135s, Nt/Tf=1000.0, dt=0.001000']
+['High overlap: 0.9979157918774447, with Tf=140s, Nt/Tf=1000.0, dt=0.001000']
+['High overlap: 0.9980120433779796, with Tf=145s, Nt/Tf=1000.0, dt=0.001000']
+['High overlap: 0.9983108515542655, with Tf=90s, Nt/Tf=20.0, dt=0.050000']
+['High overlap: 0.9984984180066638, with Tf=100s, Nt/Tf=20.0, dt=0.050000']
+['High overlap: 0.998529266581922, with Tf=110s, Nt/Tf=20.0, dt=0.050000']
+['High overlap: 0.998595520873665, with Tf=115s, Nt/Tf=20.0, dt=0.050000']
+['High overlap: 0.9986770403768688, with Tf=120s, Nt/Tf=20.0, dt=0.050000']
+['High overlap: 0.9987255699074485, with Tf=125s, Nt/Tf=20.0, dt=0.050000']
+['High overlap: 0.9988207463179075, with Tf=130s, Nt/Tf=20.0, dt=0.050000']
+['High overlap: 0.9988706121285901, with Tf=135s, Nt/Tf=20.0, dt=0.050000']
+['High overlap: 0.9989230372993876, with Tf=140s, Nt/Tf=20.0, dt=0.050000']
+['High overlap: 0.9989668681395244, with Tf=145s, Nt/Tf=20.0, dt=0.050000']
 """
 
 
